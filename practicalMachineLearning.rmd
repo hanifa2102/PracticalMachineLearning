@@ -1,0 +1,113 @@
+---
+title: "PracticalMachineLearning in Human Activity Recongnition"
+author: "Hanifa"
+date: "Sunday, March 22, 2015"
+output: html_document
+---
+#Synopsis
+The data (http://groupware.les.inf.puc-rio.br/har#literature) comes from sensors attached to six random users to monitor the quality of the exercises they perform. The idea is that using this sensors, we'd like to predict whether a user has performed his exercises correctly. After cleansing the data (by removing irrelevant variables), we perform PCA to identify the dependant variables which contribute the greatest variance in the dataset. Since linearity couldnt be detected, we stuck to tree based models to predict our outcome and we were able to get a high accuracy.
+
+
+##Data Loading
+```{r,cache=TRUE,results='hide'}
+library(caret)
+library(rattle)
+library(ggplot2)
+
+train.raw<-read.csv("pml-training.csv")
+test.raw <-read.csv("pml-testing.csv")
+```
+```{r}
+dim(train.raw)
+dim(test.raw)
+```
+There is a lot of dependant variables,it is neccesary to remove the irrelevant ones.
+
+##Data cleansing
+Irrelevant variable and variables having NA are removed. A more elegant solution would be to impute these values for NA columns, however we took the shorter solution of just
+ignoring these columns.
+
+```{r,cache=TRUE}
+cleanse.records <- function(records.raw){
+  #Remove unrelated columns
+  records.raw<-records.raw[,!grepl("^X|user_name|timestamp|window",names(records.raw))]  
+  #Remove columns with NA values. Another alternative might be to impute those values
+  #which are NA.We will take the easier alternative
+  records.raw<-records.raw[,colSums(is.na(records.raw))==0]
+  #Factor variables have to be removed to apply PCA later on.
+  records.raw <- records.raw[, sapply(records.raw,is.numeric) | 
+                               colnames(records.raw)=="classe"]  
+}
+
+train.cleanse <- cleanse.records(train.raw)
+test.cleanse <- cleanse.records(test.raw)
+
+dim(train.cleanse)
+```
+
+##Preprocessing with PCA 
+We use PCA to identify the top components which give at least 90% of the overall variance to the dataset.90% of the overall variance could be explained with just 19 variables.
+```{r,cache=TRUE}
+preProc <- preProcess(train.cleanse[,-53],method="pca",thresh=0.9)
+train.PC <- predict(preProc,train.cleanse[,-53])
+train.PC$classe<-train.raw$classe
+#ignore the problem_id for the PCA
+test.PC <-predict(preProc,test.cleanse[,-53])
+test.PC$problem_id<-test.raw$problem_id
+
+dim(train.PC)
+```
+
+##Data spliting for validation (testing/training)
+```{r,cache=TRUE}
+set.seed(2011) 
+inTrain <- createDataPartition(train.PC$classe, p=0.70, list=F)
+training <- train.PC[inTrain, ]
+testing <- train.PC[-inTrain, ]
+```
+
+##Exploratory analysis
+Pls refer to the appendix 1. for the pairwise plots, From the plots 
+the relationships seems quite random (not showing linearity),
+In this absence, we can use tree based models.
+
+## Decision Trees
+A single tree based model gives poor accuracy of just over 30%. We will reject this model. The tree model is being visualized in the appendix 2.
+```{r,cache=TRUE}
+modRpart<-train(classe~.,data=training,method="rpart")
+predictRpart<-predict(modRpart,testing)
+confusionMatrix(predictRpart,testing$classe)$overall[1]
+```
+## Random Forest
+We build a random forest with 10 trees and get over 94% accuracy.In appendix 3, we also see the importance ranking of the variables. We can conclude that variable PC1 need not be the most important variable,even though it contributes the highest variablity to the dataset.It is recommended to use a large number of trees(>200), however since it was taking too long,I just used 10 here. 
+
+```{r,cache=TRUE}
+modelRf <- train(classe ~ ., data=training, method="rf", ntree=10)
+predictRf<-predict(modelRf,testing)
+confusionMatrix(predictRf,testing$classe)
+```
+
+## Predicting the test set
+
+```{r,cache=TRUE}
+test.PC$classe<-predict(modelRf,test.PC[-20])
+test.PC[,c("problem_id","classe")]
+```
+##Appendix
+
+Appendix 1
+```{r,cache=TRUE}
+featurePlot(x=training[,c(1,2,3,4)],y=training$classe,plot="pairs")
+```
+
+Appendix 2
+
+```{r}
+#fancyRpartPlot(modRpart$finalModel)
+```
+
+Appendix 3
+
+```{r,cache=TRUE}
+#varImpPlot(modelRf$finalModel)
+```
